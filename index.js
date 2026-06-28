@@ -127,7 +127,7 @@ const SITES = [
     name: "FirstCry.com",
     shortName: "firstcry",
     baseUrl: "https://www.firstcry.com",
-    listingUrl: "https://www.firstcry.com/hotwheels/5/0/113?sort=Newest",
+    listingUrl: "https://www.firstcry.com/hotwheels/5/0/113?sort=NewArrivals",
     color: "#ff6f00",
     icon: "🍼",
   },
