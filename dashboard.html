@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🏎️ Hot Wheels Tracker — Multi-Site</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Reset & Base ─────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg-primary: #06060e;
+      --bg-secondary: #0d0d1a;
+      --bg-card: #111128;
+      --bg-card-hover: #16163a;
+      --border: #1a1a3e;
+      --border-glow: #00d4ff22;
+      --text-primary: #eaeaff;
+      --text-secondary: #8888aa;
+      --text-muted: #555577;
+      --accent-cyan: #00d4ff;
+      --accent-green: #00ff88;
+      --accent-orange: #ff8800;
+      --accent-red: #ff3366;
+      --accent-purple: #aa44ff;
+      --gradient-primary: linear-gradient(135deg, #00d4ff, #0066ff);
+      --gradient-fire: linear-gradient(135deg, #ff4400, #ff8800);
+      --gradient-green: linear-gradient(135deg, #00cc66, #00ff88);
+      --radius: 12px;
+      --radius-lg: 16px;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+      --shadow-glow: 0 0 30px rgba(0, 212, 255, 0.1);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 20%, rgba(0, 212, 255, 0.04), transparent),
+        radial-gradient(ellipse 60% 40% at 80% 80%, rgba(170, 68, 255, 0.03), transparent);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .app { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+    /* ─── Header ───────────────────────────────────── */
+    .header { text-align: center; padding: 40px 0 32px; }
+
+    .header__badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      padding: 6px 16px; border-radius: 999px;
+      font-size: 12px; color: var(--accent-cyan);
+      font-weight: 600; text-transform: uppercase; letter-spacing: 1px;
+      margin-bottom: 16px;
+    }
+
+    .header__badge .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent-green);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,136,0.4); }
+      50% { opacity: 0.7; box-shadow: 0 0 0 8px rgba(0,255,136,0); }
+    }
+
+    .header h1 {
+      font-size: 36px; font-weight: 800;
+      background: var(--gradient-primary);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text; line-height: 1.2;
+    }
+
+    .header__sub { color: var(--text-secondary); font-size: 14px; margin-top: 8px; }
+    .header__sub a { color: var(--accent-cyan); text-decoration: none; }
+
+    /* ─── Stats Grid ───────────────────────────────── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px; margin-bottom: 32px;
+    }
+
+    .stat-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px;
+      position: relative; overflow: hidden; transition: all 0.3s ease;
+    }
+
+    .stat-card:hover {
+      border-color: var(--accent-cyan);
+      box-shadow: var(--shadow-glow); transform: translateY(-2px);
+    }
+
+    .stat-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+
+    .stat-card:nth-child(1)::before { background: var(--gradient-primary); }
+    .stat-card:nth-child(2)::before { background: var(--gradient-green); }
+    .stat-card:nth-child(3)::before { background: var(--gradient-fire); }
+    .stat-card:nth-child(4)::before { background: linear-gradient(135deg, var(--accent-purple), #ff44aa); }
+    .stat-card:nth-child(5)::before { background: linear-gradient(135deg, #ffcc00, #ff8800); }
+
+    .stat-card__label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1.5px; color: var(--text-secondary); margin-bottom: 8px;
+    }
+
+    .stat-card__value {
+      font-size: 28px; font-weight: 800;
+      font-family: 'JetBrains Mono', monospace; color: var(--text-primary);
+    }
+
+    .stat-card__sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+    /* ─── Site Cards ───────────────────────────────── */
+    .site-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px; margin-bottom: 32px;
+    }
+
+    .site-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px;
+      position: relative; overflow: hidden; transition: all 0.3s ease;
+    }
+
+    .site-card:hover {
+      box-shadow: var(--shadow-glow); transform: translateY(-2px);
+    }
+
+    .site-card__header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+    }
+
+    .site-card__icon { font-size: 24px; }
+
+    .site-card__name { font-size: 16px; font-weight: 700; }
+
+    .site-card__dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      margin-left: auto; animation: pulse 2s ease-in-out infinite;
+    }
+
+    .site-card__stats {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    }
+
+    .site-card__stat-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--text-muted);
+    }
+
+    .site-card__stat-value {
+      font-size: 20px; font-weight: 800;
+      font-family: 'JetBrains Mono', monospace; color: var(--text-primary);
+    }
+
+    /* ─── Status Bar ───────────────────────────────── */
+    .status-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px 20px;
+      margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+    }
+
+    .status-bar__left { display: flex; align-items: center; gap: 12px; }
+
+    .status-indicator {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 4px 14px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    }
+
+    .status-indicator--watching {
+      background: rgba(0,255,136,0.1); color: var(--accent-green);
+      border: 1px solid rgba(0,255,136,0.2);
+    }
+
+    .status-indicator--scraping {
+      background: rgba(0,212,255,0.1); color: var(--accent-cyan);
+      border: 1px solid rgba(0,212,255,0.2); animation: shimmer 1.5s ease-in-out infinite;
+    }
+
+    .status-indicator--error {
+      background: rgba(255,51,102,0.1); color: var(--accent-red);
+      border: 1px solid rgba(255,51,102,0.2);
+    }
+
+    .status-indicator--starting {
+      background: rgba(255,136,0,0.1); color: var(--accent-orange);
+      border: 1px solid rgba(255,136,0,0.2);
+    }
+
+    @keyframes shimmer { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    .status-bar__right {
+      font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-muted);
+    }
+
+    /* ─── Sections ─────────────────────────────────── */
+    .section { margin-bottom: 32px; }
+
+    .section__title {
+      font-size: 18px; font-weight: 700; margin-bottom: 16px;
+      display: flex; align-items: center; gap: 10px;
+    }
+
+    .section__title .icon { font-size: 22px; }
+
+    .section__count {
+      background: var(--bg-card); border: 1px solid var(--border);
+      padding: 2px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 600; color: var(--accent-cyan);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* ─── Product Cards ────────────────────────────── */
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 16px;
+    }
+
+    .product-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); overflow: hidden;
+      transition: all 0.3s ease; display: flex; flex-direction: column;
+    }
+
+    .product-card:hover {
+      border-color: var(--accent-cyan);
+      box-shadow: var(--shadow-glow); transform: translateY(-3px);
+    }
+
+    .product-card__image-wrap {
+      position: relative; background: var(--bg-secondary);
+      padding: 16px; display: flex; justify-content: center;
+      align-items: center; min-height: 180px;
+    }
+
+    .product-card__image-wrap img {
+      max-width: 100%; max-height: 160px; object-fit: contain;
+      border-radius: 8px; transition: transform 0.3s ease;
+    }
+
+    .product-card:hover .product-card__image-wrap img { transform: scale(1.05); }
+
+    .product-card__site-badge {
+      position: absolute; top: 12px; left: 12px;
+      padding: 4px 10px; border-radius: 999px;
+      font-size: 11px; font-weight: 700;
+      background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+    }
+
+    .product-card__stock-badge {
+      position: absolute; top: 12px; right: 12px;
+      padding: 4px 10px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+
+    .product-card__stock-badge--in {
+      background: rgba(0,255,136,0.15); color: var(--accent-green);
+      border: 1px solid rgba(0,255,136,0.25);
+    }
+
+    .product-card__stock-badge--out {
+      background: rgba(255,51,102,0.15); color: var(--accent-red);
+      border: 1px solid rgba(255,51,102,0.25);
+    }
+
+    .product-card__body {
+      padding: 16px 20px 20px; flex: 1; display: flex; flex-direction: column;
+    }
+
+    .product-card__title {
+      font-size: 14px; font-weight: 600; line-height: 1.4;
+      color: var(--text-primary); margin-bottom: 8px;
+      display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; overflow: hidden;
+    }
+
+    .product-card__meta {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border);
+    }
+
+    .product-card__price {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 22px; font-weight: 800; color: var(--accent-green);
+    }
+
+    .product-card__link {
+      display: inline-flex; align-items: center; gap: 6px;
+      color: #fff; font-size: 12px; font-weight: 700;
+      padding: 8px 16px; border-radius: 8px;
+      text-decoration: none; transition: all 0.2s ease;
+    }
+
+    .product-card__link:hover {
+      transform: scale(1.05); box-shadow: 0 0 16px rgba(0,212,255,0.3);
+    }
+
+    .product-card__found-at {
+      font-size: 11px; color: var(--text-muted); margin-top: 8px;
+    }
+
+    /* ─── Log Table ────────────────────────────────── */
+    .log-table-wrap {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+
+    .log-table { width: 100%; border-collapse: collapse; }
+
+    .log-table th {
+      background: var(--bg-secondary); padding: 12px 16px;
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1.5px; color: var(--accent-cyan);
+      text-align: left; border-bottom: 1px solid var(--border);
+    }
+
+    .log-table td {
+      padding: 10px 16px; font-size: 13px;
+      border-bottom: 1px solid var(--border); color: var(--text-secondary);
+    }
+
+    .log-table tr:last-child td { border-bottom: none; }
+    .log-table tr:hover td { background: var(--bg-card-hover); }
+
+    .log-table .mono {
+      font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    }
+
+    /* ─── Empty State ──────────────────────────────── */
+    .empty-state { text-align: center; padding: 48px 24px; color: var(--text-muted); }
+    .empty-state__icon { font-size: 48px; margin-bottom: 16px; }
+    .empty-state__text { font-size: 14px; line-height: 1.6; }
+
+    /* ─── Errors ───────────────────────────────────── */
+    .error-list { display: flex; flex-direction: column; gap: 8px; }
+
+    .error-item {
+      background: rgba(255,51,102,0.05); border: 1px solid rgba(255,51,102,0.15);
+      border-radius: var(--radius); padding: 12px 16px; font-size: 13px;
+    }
+
+    .error-item__time {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; color: var(--accent-red); margin-bottom: 4px;
+    }
+
+    .error-item__msg { color: var(--text-secondary); }
+
+    /* ─── Footer ───────────────────────────────────── */
+    .footer {
+      text-align: center; padding: 32px 0 16px;
+      color: var(--text-muted); font-size: 12px;
+    }
+    .footer a { color: var(--accent-cyan); text-decoration: none; }
+
+    /* ─── Scrollbar ─────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-primary); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--accent-cyan); }
+
+    /* ─── Responsive ───────────────────────────────── */
+    @media (max-width: 640px) {
+      .app { padding: 16px; }
+      .header h1 { font-size: 24px; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .products-grid { grid-template-columns: 1fr; }
+      .stat-card__value { font-size: 22px; }
+      .site-cards { grid-template-columns: 1fr; }
+    }
+
+    /* ─── Animations ───────────────────────────────── */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .animate-in { animation: fadeInUp 0.5s ease forwards; }
+
+    .product-card { animation: fadeInUp 0.4s ease backwards; }
+    .product-card:nth-child(1) { animation-delay: 0.05s; }
+    .product-card:nth-child(2) { animation-delay: 0.1s; }
+    .product-card:nth-child(3) { animation-delay: 0.15s; }
+    .product-card:nth-child(4) { animation-delay: 0.2s; }
+    .product-card:nth-child(5) { animation-delay: 0.25s; }
+    .product-card:nth-child(6) { animation-delay: 0.3s; }
+
+    /* ─── Toast ─────────────────────────────────────── */
+    .toast-container {
+      position: fixed; top: 20px; right: 20px; z-index: 1000;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+
+    .toast {
+      background: var(--bg-card); border: 1px solid var(--accent-green);
+      border-radius: var(--radius); padding: 14px 20px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      animation: slideIn 0.4s ease, fadeOut 0.4s ease 4s forwards;
+      max-width: 360px;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(100px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    @keyframes fadeOut {
+      to { opacity: 0; transform: translateX(50px); }
+    }
+
+    .toast__title { font-size: 13px; font-weight: 700; color: var(--accent-green); margin-bottom: 4px; }
+    .toast__body { font-size: 12px; color: var(--text-secondary); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header animate-in">
+      <div class="header__badge">
+        <span class="dot"></span>
+        Live Multi-Site Monitoring
+      </div>
+      <h1>🏎️ Hot Wheels Tracker</h1>
+      <p class="header__sub">Monitoring multiple stores for new Hot Wheels stock</p>
+    </header>
+
+    <!-- Status Bar -->
+    <div class="status-bar animate-in">
+      <div class="status-bar__left">
+        <span class="status-indicator status-indicator--starting" id="statusIndicator">⏳ Starting...</span>
+        <span style="font-size:13px; color:var(--text-secondary)" id="lastCheckText">Waiting for first check...</span>
+      </div>
+      <div class="status-bar__right" id="uptimeText">Uptime: --</div>
+    </div>
+
+    <!-- Site Cards -->
+    <div class="site-cards animate-in" id="siteCards"></div>
+
+    <!-- Stats Grid -->
+    <div class="stats animate-in">
+      <div class="stat-card">
+        <div class="stat-card__label">Total Checks</div>
+        <div class="stat-card__value" id="totalChecks">0</div>
+        <div class="stat-card__sub" id="intervalSub">Every 10s</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card__label">Products Found</div>
+        <div class="stat-card__value" id="totalProducts">0</div>
+        <div class="stat-card__sub">Across all sites</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card__label">New Discoveries</div>
+        <div class="stat-card__value" id="newProducts">0</div>
+        <div class="stat-card__sub">Since tracking started</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card__label">Emails Sent</div>
+        <div class="stat-card__value" id="emailsSent">0</div>
+        <div class="stat-card__sub" id="emailFailSub">0 failed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card__label">Known Products</div>
+        <div class="stat-card__value" id="seenCount">0</div>
+        <div class="stat-card__sub">In database</div>
+      </div>
+    </div>
+
+    <!-- Recent Products -->
+    <section class="section">
+      <h2 class="section__title">
+        <span class="icon">🆕</span>
+        Recently Discovered
+        <span class="section__count" id="recentCount">0</span>
+      </h2>
+      <div class="products-grid" id="productsGrid">
+        <div class="empty-state" style="grid-column:1/-1;">
+          <div class="empty-state__icon">🔍</div>
+          <div class="empty-state__text">
+            No new products discovered yet.<br/>
+            The tracker is actively monitoring — new finds will appear here.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Activity Log -->
+    <section class="section">
+      <h2 class="section__title">
+        <span class="icon">📋</span>
+        Activity Log
+      </h2>
+      <div class="log-table-wrap">
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Site</th>
+              <th>New Items</th>
+              <th>Products</th>
+            </tr>
+          </thead>
+          <tbody id="logBody">
+            <tr><td colspan="4" style="text-align:center; padding:24px; color:var(--text-muted);">Waiting for activity...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Errors -->
+    <section class="section" id="errorsSection" style="display:none;">
+      <h2 class="section__title"><span class="icon">⚠️</span> Recent Errors</h2>
+      <div class="error-list" id="errorList"></div>
+    </section>
+
+    <footer class="footer">
+      Built with ❤️ for Hot Wheels collectors
+    </footer>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script>
+    let prevNewCount = 0;
+
+    function formatUptime(s) {
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+      return `${h > 0 ? h + 'h ' : ''}${m}m ${sec}s`;
+    }
+
+    function formatTime(iso) {
+      if (!iso) return '--';
+      return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    }
+
+    function formatDateTime(iso) {
+      if (!iso) return '--';
+      return new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    }
+
+    function showToast(title, body) {
+      const c = document.getElementById('toastContainer');
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.innerHTML = `<div class="toast__title">${title}</div><div class="toast__body">${body}</div>`;
+      c.appendChild(t);
+      setTimeout(() => t.remove(), 5000);
+    }
+
+    function renderSiteCards(sites) {
+      const container = document.getElementById('siteCards');
+      if (!sites || sites.length === 0) return;
+      container.innerHTML = sites.map(s => `
+        <div class="site-card" style="border-color: ${s.color}33;">
+          <div class="site-card__header">
+            <span class="site-card__icon">${s.icon}</span>
+            <span class="site-card__name" style="color:${s.color};">${s.name}</span>
+            <span class="site-card__dot" style="background:${s.lastError ? 'var(--accent-red)' : 'var(--accent-green)'};"></span>
+          </div>
+          <div class="site-card__stats">
+            <div>
+              <div class="site-card__stat-label">Products</div>
+              <div class="site-card__stat-value">${s.totalProducts}</div>
+            </div>
+            <div>
+              <div class="site-card__stat-label">New Found</div>
+              <div class="site-card__stat-value" style="color:var(--accent-green);">${s.newFound}</div>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function updateStatus(data) {
+      const indicator = document.getElementById('statusIndicator');
+      const statusMap = {
+        watching: { cls: 'status-indicator--watching', text: '● Watching' },
+        scraping: { cls: 'status-indicator--scraping', text: '◉ Scraping...' },
+        error: { cls: 'status-indicator--error', text: '✖ Error' },
+        starting: { cls: 'status-indicator--starting', text: '⏳ Starting...' },
+      };
+      const s = statusMap[data.status] || statusMap.starting;
+      indicator.className = `status-indicator ${s.cls}`;
+      indicator.textContent = s.text;
+
+      document.getElementById('lastCheckText').textContent =
+        data.lastCheck ? `Last check: ${formatTime(data.lastCheck)}` : 'Waiting for first check...';
+      document.getElementById('uptimeText').textContent = `Uptime: ${formatUptime(data.uptimeSeconds)}`;
+      document.getElementById('totalChecks').textContent = data.totalChecks.toLocaleString();
+      document.getElementById('totalProducts').textContent = data.totalProducts.toLocaleString();
+      document.getElementById('newProducts').textContent = data.newProductsFound.toLocaleString();
+      document.getElementById('emailsSent').textContent = data.emailsSent.toLocaleString();
+      document.getElementById('emailFailSub').textContent = `${data.emailsFailed} failed`;
+      document.getElementById('seenCount').textContent = data.seenCount.toLocaleString();
+      document.getElementById('intervalSub').textContent = `Every ${data.intervalMs / 1000}s`;
+
+      // Site cards
+      renderSiteCards(data.sites);
+
+      if (data.newProductsFound > prevNewCount && prevNewCount > 0) {
+        const diff = data.newProductsFound - prevNewCount;
+        showToast(`🆕 ${diff} New Product${diff > 1 ? 's' : ''}!`, 'Check the dashboard for details');
+      }
+      prevNewCount = data.newProductsFound;
+
+      const errSec = document.getElementById('errorsSection');
+      const errList = document.getElementById('errorList');
+      if (data.errors && data.errors.length > 0) {
+        errSec.style.display = '';
+        errList.innerHTML = data.errors.map(e => `
+          <div class="error-item">
+            <div class="error-item__time">${e.site ? e.site + ' — ' : ''}${formatDateTime(e.timestamp)}</div>
+            <div class="error-item__msg">${e.message}</div>
+          </div>
+        `).join('');
+      } else {
+        errSec.style.display = 'none';
+      }
+    }
+
+    function renderProducts(products) {
+      const grid = document.getElementById('productsGrid');
+      document.getElementById('recentCount').textContent = products.length;
+
+      if (products.length === 0) {
+        grid.innerHTML = `
+          <div class="empty-state" style="grid-column:1/-1;">
+            <div class="empty-state__icon">🔍</div>
+            <div class="empty-state__text">No new products discovered yet.<br/>The tracker is actively monitoring — new finds will appear here.</div>
+          </div>`;
+        return;
+      }
+
+      grid.innerHTML = products.map(p => {
+        const color = p.siteColor || '#00d4ff';
+        return `
+        <div class="product-card" style="border-top: 2px solid ${color};">
+          <div class="product-card__image-wrap">
+            <img src="${p.image}" alt="${p.title}" loading="lazy" />
+            <span class="product-card__site-badge" style="color:${color};">${p.siteIcon || '🛒'} ${p.site || 'Unknown'}</span>
+            <span class="product-card__stock-badge ${p.available ? 'product-card__stock-badge--in' : 'product-card__stock-badge--out'}">
+              ${p.available ? '✅ In Stock' : '❌ Sold Out'}
+            </span>
+          </div>
+          <div class="product-card__body">
+            <div class="product-card__title">${p.title}</div>
+            <div class="product-card__found-at">Found: ${formatDateTime(p.foundAt)}</div>
+            <div class="product-card__meta">
+              <span class="product-card__price">₹${parseFloat(p.price).toLocaleString('en-IN')}</span>
+              <a class="product-card__link" href="${p.url}" target="_blank" style="background:linear-gradient(135deg, ${color}, ${color}88);">
+                Buy Now →
+              </a>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function renderLog(logs) {
+      const body = document.getElementById('logBody');
+      if (logs.length === 0) {
+        body.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:24px; color:var(--text-muted);">Waiting for activity...</td></tr>';
+        return;
+      }
+      body.innerHTML = logs.map(l => {
+        const sites = [...new Set((l.products || []).map(p => p.site).filter(Boolean))].join(', ') || '--';
+        return `
+        <tr>
+          <td class="mono">${formatDateTime(l.timestamp)}</td>
+          <td>${sites}</td>
+          <td><span style="color:var(--accent-green); font-weight:700;">+${l.newCount}</span></td>
+          <td style="color:var(--text-primary);">${(l.products || []).map(p => `${p.title} <span style="color:var(--accent-green);">(₹${p.price})</span>`).join('<br/>')}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function refresh() {
+      try {
+        const [statusRes, productsRes, logRes] = await Promise.all([
+          fetch('/api/status').then(r => r.json()),
+          fetch('/api/products').then(r => r.json()),
+          fetch('/api/log').then(r => r.json()),
+        ]);
+        updateStatus(statusRes);
+        renderProducts(productsRes);
+        renderLog(logRes);
+      } catch (err) {
+        console.error('Dashboard refresh error:', err);
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>
