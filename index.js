@@ -189,12 +189,12 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 function fetchText(url) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
-    https
-      .get(
+    const req = https.get(
         {
           hostname: parsed.hostname,
           path: parsed.pathname + parsed.search,
           headers: { "User-Agent": UA, "Accept-Encoding": "gzip, deflate" },
+          timeout: 10000 // 10 second timeout
         },
         (res) => {
           // Follow redirects
@@ -220,8 +220,13 @@ function fetchText(url) {
           });
           stream.on("error", reject);
         }
-      )
-      .on("error", reject);
+      );
+      
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Request timed out after 10s"));
+    });
+    req.on("error", reject);
   });
 }
 
