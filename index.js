@@ -122,6 +122,15 @@ const SITES = [
     color: "#00b894",
     icon: "🎲",
   },
+  {
+    type: "firstcry",
+    name: "FirstCry.com",
+    shortName: "firstcry",
+    baseUrl: "https://www.firstcry.com",
+    listingUrl: "https://www.firstcry.com/hotwheels/5/0/113?sort=Newest",
+    color: "#ff6f00",
+    icon: "🍼",
+  },
 ];
 
 const CONFIG = {
@@ -453,6 +462,57 @@ async function fetchWixSSRProducts(shopPageUrl, wixAppId) {
   });
 }
 
+/**
+ * Fetches products from FirstCry.com by scraping server-rendered HTML.
+ * FirstCry uses a custom platform — product cards are embedded in the HTML
+ * with class="li_inner_block listingpg-{PID}" and aria-label for titles.
+ * @param {string} listingUrl - Full URL to the brand/category listing page
+ */
+async function fetchFirstCryProducts(listingUrl) {
+  const html = await fetchText(listingUrl);
+
+  // Extract product cards: class="li_inner_block listingpg-{PID}" aria-label="{title}"
+  const cards = [...html.matchAll(
+    /class="li_inner_block\s+listingpg-(\d+)"[^>]*aria-label="([^"]+)"/g
+  )];
+
+  // Deduplicate by PID
+  const seenPids = new Set();
+  const products = [];
+
+  for (const card of cards) {
+    const pid = card[1];
+    const title = card[2];
+    if (seenPids.has(pid)) continue;
+    seenPids.add(pid);
+
+    // Find the product URL for this PID
+    const urlMatch = html.match(new RegExp(`href=['"]([^'"]*/${pid}/product-detail)['"]`));
+    const relUrl = urlMatch ? urlMatch[1].replace(/^\/\/www\.firstcry\.com/, "") : `/product-detail`;
+
+    // Find stock status: the parent div has data-outstock="true" or "false"
+    const stockMatch = html.match(new RegExp(
+      `data-outstock="(\w+)"[^>]*>[\s\S]*?listingpg-${pid}"`
+    ));
+    const isOutOfStock = stockMatch ? stockMatch[1] === "true" : false;
+
+    // Image URL follows a predictable pattern
+    const image = `https://cdn.fcglcdn.com/brainbees/images/products/438x531/${pid}a.webp`;
+
+    products.push({
+      id: pid,
+      title: title,
+      handle: pid,
+      price: "—", // Prices are loaded via JS on FirstCry, not in SSR HTML
+      available: !isOutOfStock,
+      image: image,
+      url: relUrl,
+    });
+  }
+
+  return products;
+}
+
 function buildEmailHTML(newProducts) {
   // Group products by site
   const grouped = {};
@@ -549,6 +609,8 @@ async function scrape() {
         products = await fetchWixSSRProducts(site.shopPageUrl, site.wixAppId);
       } else if (site.type === "sitemap") {
         products = await fetchSitemapProducts(site.sitemapUrl, site.productPathMatch);
+      } else if (site.type === "firstcry") {
+        products = await fetchFirstCryProducts(site.listingUrl);
       } else {
         // Default: Shopify
         const rawProducts = await fetchAllCollectionProducts(site.collectionApi);
