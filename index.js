@@ -76,14 +76,29 @@ const SITES = [
     icon: "🏎️",
   },
   {
-    type: "sitemap",
-    name: "KarzAndDolls.com",
-    shortName: "karzanddolls",
+    type: "karzanddolls-custom",
+    name: "KarzAndDolls MiniGT",
+    shortName: "karzanddolls-minigt",
     baseUrl: "https://www.karzanddolls.com",
-    sitemapUrl: "https://www.karzanddolls.com/sitemap.xml",
-    productPathMatch: "/product/",
+    // Static allowlist — skips category-page discovery and caps pagination per
+    // subcategory based on known page counts, instead of probing up to maxPages=20.
+    subcategories: [
+      { name: "Mini GT", url: "https://www.karzanddolls.com/details/mini+gt+/mini-gt/MTY1", maxPages: 2 },
+      { name: "Mini GT Blister Pack", url: "https://www.karzanddolls.com/details/mini+gt+/mini-gt-blister-pack/MTY2", maxPages: 3 },
+    ],
     color: "#aa44ff",
     icon: "🚗",
+  },
+  {
+    type: "karzanddolls-custom",
+    name: "KarzAndDolls HotWheels",
+    shortName: "karzanddolls-hw",
+    baseUrl: "https://www.karzanddolls.com",
+    subcategories: [
+      { name: "Car Culture", url: "https://www.karzanddolls.com/details/hot+wheels/car-culture/MTEx", maxPages: 1 },
+    ],
+    color: "#cc33ff",
+    icon: "🏁",
   },
   {
     type: "ogmini-api",
@@ -199,44 +214,65 @@ function fetchText(url) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const req = https.get(
-        {
-          hostname: parsed.hostname,
-          path: parsed.pathname + parsed.search,
-          headers: { "User-Agent": UA, "Accept-Encoding": "gzip, deflate" },
-          timeout: 10000 // 10 second timeout
-        },
-        (res) => {
-          // Follow redirects
-          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            return fetchText(res.headers.location).then(resolve, reject);
-          }
-
-          // Decompress if needed
-          let stream = res;
-          const encoding = (res.headers["content-encoding"] || "").toLowerCase();
-          if (encoding === "gzip") {
-            stream = res.pipe(zlib.createGunzip());
-          } else if (encoding === "deflate") {
-            stream = res.pipe(zlib.createInflate());
-          }
-
-          let data = "";
-          stream.on("data", (chunk) => (data += chunk));
-          stream.on("end", () => {
-            if (res.statusCode === 429) return reject(new Error("Rate limited (429) — will retry next cycle"));
-            if (res.statusCode >= 400) return reject(new Error(`HTTP ${res.statusCode}`));
-            resolve(data);
-          });
-          stream.on("error", reject);
+      {
+        hostname: parsed.hostname,
+        path: parsed.pathname + parsed.search,
+        headers: { "User-Agent": UA, "Accept-Encoding": "gzip, deflate" },
+        timeout: 10000 // 10 second timeout
+      },
+      (res) => {
+        // Follow redirects
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return fetchText(res.headers.location).then(resolve, reject);
         }
-      );
-      
+
+        // Decompress if needed
+        let stream = res;
+        const encoding = (res.headers["content-encoding"] || "").toLowerCase();
+        if (encoding === "gzip") {
+          stream = res.pipe(zlib.createGunzip());
+        } else if (encoding === "deflate") {
+          stream = res.pipe(zlib.createInflate());
+        }
+
+        let data = "";
+        stream.on("data", (chunk) => (data += chunk));
+        stream.on("end", () => {
+          if (res.statusCode === 429) return reject(new Error("Rate limited (429) — will retry next cycle"));
+          if (res.statusCode >= 400) return reject(new Error(`HTTP ${res.statusCode}`));
+          resolve(data);
+        });
+        stream.on("error", reject);
+      }
+    );
+
     req.on("timeout", () => {
       req.destroy();
       reject(new Error("Request timed out after 10s"));
     });
     req.on("error", reject);
   });
+}
+
+/**
+ * Retries an async function up to maxAttempts times with a short delay between attempts.
+ * Used to handle transient network blips without skipping a site for the full cycle.
+ */
+async function withRetry(fn, maxAttempts = 3, delayMs = 500) {
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      // Don't retry on rate-limit or definitive HTTP errors — only network/timeout issues
+      if (err.message.startsWith("HTTP ") || err.message.startsWith("Rate limited")) throw err;
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 /**
@@ -308,38 +344,165 @@ async function fetchSitemapProducts(sitemapUrl, pathMatch) {
   const xml = await fetchText(sitemapUrl);
   const urls = [...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map((m) => m[1]);
 
-  return urls
+  // Deduplicate by full URL to avoid processing the same URL twice
+  const seen = new Set();
+  const uniqueUrls = urls.filter((u) => {
+    if (seen.has(u)) return false;
+    seen.add(u);
+    return true;
+  });
+
+  return uniqueUrls
     .filter((u) => u.includes(pathMatch))
     .map((u) => {
+      const relUrl = new URL(u).pathname;
+
+      // Use the full relative path as the stable, definitive product ID.
+      // This eliminates the guesswork of extracting a slug from unusual URL structures
+      // and prevents duplicate alerts when two URLs produce the same slug.
+      const id = relUrl;
+
+      // Still derive a human-readable title from the most descriptive URL segment
       const afterMatch = u.split(pathMatch)[1] || "";
-      // Extract the readable slug: find the product-name segment
-      // e.g. "/product/special-stocks/mazda-rx-7-falken/abc123hash" -> "mazda-rx-7-falken"
-      // e.g. "/product-page/hot-wheels-premium-car" -> "hot-wheels-premium-car"
       const segments = afterMatch.split("/").filter(Boolean);
-      // Pick the longest hyphenated segment under 100 chars (the product name),
-      // skip short category names and long hashes
       const nameSegment =
         [...segments]
           .filter((s) => s.includes("-") && s.length < 100)
           .sort((a, b) => b.length - a.length)[0] ||
         segments[0] ||
         afterMatch;
-      const slug = nameSegment;
-      const title = slug
+      const title = nameSegment
         .replace(/-/g, " ")
         .replace(/\b\w/g, (c) => c.toUpperCase());
-      // Use the full path after the domain as the relative URL
-      const relUrl = new URL(u).pathname;
+
       return {
-        id: slug,
-        title: title,
-        handle: slug,
+        id,
+        title,
+        handle: nameSegment,
         price: "—",
         available: true,
         image: "",
         url: relUrl,
       };
     });
+}
+
+/**
+ * Fetches products from KarzAndDolls.com by parsing SSR HTML.
+ * The site is a custom PHP platform with paginated subcategory pages
+ * (e.g. /details/mini+gt+/mini-gt/...) containing server-rendered product cards.
+ *
+ * Subcategories are a static, hand-curated allowlist (site.subcategories) rather
+ * than discovered from a category landing page — this skips a request per cycle
+ * and avoids picking up subcategories you don't care about. Each subcategory's
+ * `maxPages` is a known page count, not a probing ceiling, and all subcategories
+ * for a site are fetched concurrently to keep this scraper from dominating cycle time.
+ *
+ * Product card HTML structure:
+ *   <div class="col-md-4 col-lg-3 col-xs-6" data-latest="{ID}" data-price="{PRICE}">
+ *     <img data-src="{IMAGE_URL}" alt="{TITLE}" />
+ *     <a href="https://www.karzanddolls.com/product/...">
+ *     <li data-qty="{STOCK_QTY}">
+ */
+/**
+ * Fetches a single subcategory's product cards across its known page range.
+ * `maxPages` comes from the static config — a known/expected page count,
+ * not a probing ceiling — so we stop as soon as we hit it without guessing.
+ */
+async function fetchKarzAndDollsSubcategory(subcatUrl, maxPages, seenIds, allProducts) {
+  let page = 1;
+
+  while (page <= maxPages) {
+      const pageUrl = page === 1 ? subcatUrl : `${subcatUrl}?page=${page}`;
+      let html;
+      try {
+        html = await fetchText(pageUrl);
+      } catch (err) {
+        // If page doesn't exist or errors, stop paginating this subcategory
+        break;
+      }
+
+      // Extract product cards: data-latest="{ID}" data-price="{PRICE}"
+      const cardMatches = [...html.matchAll(
+        /data-latest="(\d+)"\s*\n?\s*data-price="([\d.]+)"/g
+      )];
+
+      if (cardMatches.length === 0) break; // No products on this page
+
+      let productsOnPage = 0;
+
+      for (const card of cardMatches) {
+        const id = card[1];
+        const price = card[2];
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+        productsOnPage++;
+
+        // Extract image: data-src="..." that follows this product card
+        // Find the section of HTML for this product (from data-latest to the next data-latest or end)
+        const idIdx = html.indexOf(`data-latest="${id}"`);
+        const nextIdMatch = html.indexOf('data-latest="', idIdx + 20);
+        const cardHtml = nextIdMatch > -1
+          ? html.substring(idIdx, nextIdMatch)
+          : html.substring(idIdx, idIdx + 5000);
+
+        // Extract image URL
+        const imgMatch = cardHtml.match(/data-src="([^"]+)"/)
+          || cardHtml.match(/src="(https:\/\/www\.karzanddolls\.com\/uploads\/[^"]+)"/);
+        const image = imgMatch ? imgMatch[1] : "";
+
+        // Extract title from img alt attribute
+        const altMatch = cardHtml.match(/alt="([^"]+)"/);
+        const title = altMatch
+          ? altMatch[1].trim()
+          : `Product ${id}`;
+
+        // Extract product URL
+        const urlMatch = cardHtml.match(
+          /href="(https:\/\/www\.karzanddolls\.com\/product\/[^"]+)"/
+        ) || cardHtml.match(
+          /window\.location\.href\s*=\s*'(https:\/\/www\.karzanddolls\.com\/product\/[^']+)'/
+        );
+        const productUrl = urlMatch ? new URL(urlMatch[1]).pathname : `/product/${id}`;
+
+        // Extract stock quantity from data-qty
+        const qtyMatch = cardHtml.match(/data-qty="(\d+)"/);
+        const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 0;
+
+        allProducts.push({
+          id,
+          title,
+          handle: id,
+          price,
+          available: qty > 0,
+          image,
+          url: productUrl,
+        });
+      }
+
+      // Check if there's a next page link
+      const hasNextPage = html.includes(`?page=${page + 1}`);
+      if (!hasNextPage || productsOnPage === 0) break;
+      page++;
+  }
+}
+
+/**
+ * Fetches all configured subcategories for a KarzAndDolls site concurrently,
+ * deduplicating products by id across subcategories.
+ * @param {Array<{name: string, url: string, maxPages: number}>} subcategories
+ */
+async function fetchKarzAndDollsProducts(subcategories) {
+  const allProducts = [];
+  const seenIds = new Set();
+
+  await Promise.all(
+    subcategories.map((sub) =>
+      fetchKarzAndDollsSubcategory(sub.url, sub.maxPages, seenIds, allProducts)
+    )
+  );
+
+  return allProducts;
 }
 
 /**
@@ -390,7 +553,7 @@ async function fetchWooProducts(apiUrl) {
     const priceStr = minorUnit > 0
       ? (parseInt(priceRaw, 10) / Math.pow(10, minorUnit)).toString()
       : priceRaw;
-    
+
     const compareRaw = p.prices?.regular_price || "0";
     const compareStr = minorUnit > 0
       ? (parseInt(compareRaw, 10) / Math.pow(10, minorUnit)).toString()
@@ -492,7 +655,7 @@ async function fetchFirstCryProducts(listingUrl) {
 
     // Find stock status: the parent div has data-outstock="true" or "false"
     const stockMatch = html.match(new RegExp(
-      `data-outstock="(\w+)"[^>]*>[\s\S]*?listingpg-${pid}"`
+      `data-outstock="(\\w+)"[^>]*>[\\s\\S]*?listingpg-${pid}"`
     ));
     const isOutOfStock = stockMatch ? stockMatch[1] === "true" : false;
 
@@ -521,6 +684,12 @@ function buildEmailHTML(newProducts) {
     grouped[p._siteName].push(p);
   }
 
+  const totalNew = newProducts.filter((p) => !p._isRestock).length;
+  const totalRestocks = newProducts.filter((p) => p._isRestock).length;
+  const summaryParts = [];
+  if (totalNew > 0) summaryParts.push(`${totalNew} new arrival${totalNew > 1 ? "s" : ""}`);
+  if (totalRestocks > 0) summaryParts.push(`${totalRestocks} restock${totalRestocks > 1 ? "s" : ""}`);
+
   let siteSections = "";
   for (const [siteName, products] of Object.entries(grouped)) {
     const site = SITES.find((s) => s.name === siteName) || { color: "#00d4ff", icon: "🛒" };
@@ -532,6 +701,7 @@ function buildEmailHTML(newProducts) {
           <img src="${p.image}" alt="${p.title}" style="width:80px; height:80px; object-fit:contain; border-radius:8px; background:#1a1a2e;" />
         </td>
         <td style="padding:12px; border-bottom:1px solid #2a2a3e;">
+          ${p._isRestock ? `<span style="display:inline-block; background:#ff9900; color:#000; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; margin-bottom:4px; letter-spacing:0.5px;">♻️ RESTOCK</span><br/>` : ""}
           <a href="${p._fullUrl}" style="color:${site.color}; text-decoration:none; font-weight:600;">${p.title}</a>
           <br/>
           <span style="color:#888; font-size:12px;">${p.available ? "✅ In Stock" : "❌ Out of Stock"}</span>
@@ -546,7 +716,7 @@ function buildEmailHTML(newProducts) {
     siteSections += `
       <div style="margin:16px 0 8px; padding:10px 16px; background:${site.color}11; border-left:3px solid ${site.color}; border-radius:0 8px 8px 0;">
         <span style="font-size:14px; font-weight:700; color:${site.color};">${site.icon} ${siteName}</span>
-        <span style="color:#888; font-size:12px; margin-left:8px;">${products.length} new</span>
+        <span style="color:#888; font-size:12px; margin-left:8px;">${products.length} item${products.length > 1 ? "s" : ""}</span>
       </div>
       <table style="width:100%; border-collapse:collapse;">
         <tbody>${rows}</tbody>
@@ -556,12 +726,54 @@ function buildEmailHTML(newProducts) {
   return `
     <div style="font-family:'Segoe UI',Arial,sans-serif; background:#0a0a1a; color:#e0e0e0; padding:24px; border-radius:12px; max-width:700px; margin:auto;">
       <div style="text-align:center; padding:16px 0; border-bottom:2px solid #00d4ff;">
-        <h1 style="margin:0; color:#00d4ff; font-size:24px;">🏎️ New Hot Wheels Found!</h1>
-        <p style="margin:4px 0 0; color:#888; font-size:14px;">${newProducts.length} new product${newProducts.length > 1 ? "s" : ""} across ${Object.keys(grouped).length} store${Object.keys(grouped).length > 1 ? "s" : ""}</p>
+        <h1 style="margin:0; color:#00d4ff; font-size:24px;">🏎️ Hot Wheels Alert!</h1>
+        <p style="margin:4px 0 0; color:#888; font-size:14px;">${summaryParts.join(" · ")} across ${Object.keys(grouped).length} store${Object.keys(grouped).length > 1 ? "s" : ""}</p>
       </div>
       ${siteSections}
       <p style="text-align:center; color:#555; font-size:11px; margin-top:16px;">Sent by Hot Wheels Tracker • ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</p>
     </div>`;
+}
+
+// ─── Loud Failure Tracking ───────────────────────────────────────────
+// Tracks consecutive failures per site. If a brittle scraper (firstcry, wix-ssr)
+// fails LOUD_FAILURE_THRESHOLD times in a row, a system alert email is dispatched.
+const LOUD_FAILURE_THRESHOLD = 3;
+const BRITTLE_SITE_TYPES = new Set(["firstcry", "wix-ssr", "karzanddolls-custom"]);
+const consecutiveFailures = {};
+for (const site of SITES) {
+  consecutiveFailures[site.shortName] = 0;
+}
+
+async function sendLoudFailureEmail(site, errorMessage) {
+  const subject = `⚠️ SCRAPER BROKEN: ${site.name} has failed ${LOUD_FAILURE_THRESHOLD} times in a row`;
+  const html = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif; background:#0a0a1a; color:#e0e0e0; padding:24px; border-radius:12px; max-width:600px; margin:auto;">
+      <div style="text-align:center; padding:16px 0; border-bottom:2px solid #ff4444;">
+        <h1 style="margin:0; color:#ff4444; font-size:22px;">⚠️ Scraper Maintenance Required</h1>
+      </div>
+      <div style="margin:20px 0; padding:16px; background:#1a0a0a; border-left:4px solid #ff4444; border-radius:0 8px 8px 0;">
+        <p style="margin:0 0 8px; font-size:16px; font-weight:700; color:${site.color};">${site.icon} ${site.name}</p>
+        <p style="margin:0; color:#aaa; font-size:13px;">This scraper has failed <strong style="color:#ff4444;">${LOUD_FAILURE_THRESHOLD} consecutive times</strong> and is likely broken. Tracking for this store has silently stopped.</p>
+      </div>
+      <div style="margin:16px 0; padding:12px; background:#111; border-radius:8px;">
+        <p style="margin:0 0 4px; color:#666; font-size:11px; text-transform:uppercase; letter-spacing:1px;">Last error</p>
+        <p style="margin:0; color:#ff8888; font-family:monospace; font-size:13px;">${errorMessage}</p>
+      </div>
+      <p style="color:#555; font-size:11px; margin-top:16px; text-align:center;">The store's HTML structure may have changed. Manual inspection and scraper update required.</p>
+      <p style="text-align:center; color:#444; font-size:11px;">Sent by Hot Wheels Tracker • ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</p>
+    </div>`;
+  await sendEmail(subject, html);
+  clearLine();
+  console.error(`🚨 Loud failure alert sent for ${site.name} — scraper needs maintenance!`);
+}
+
+// ─── Terminal Helpers ────────────────────────────────────────────────
+/**
+ * Clears the current terminal line before printing, preventing
+ * asynchronous error messages from colliding with polling status text.
+ */
+function clearLine() {
+  process.stdout.write("\r\x1b[2K");
 }
 
 // ─── State for Dashboard ─────────────────────────────────────────────
@@ -593,81 +805,176 @@ for (const site of SITES) {
 }
 
 // ─── Scrape Loop ─────────────────────────────────────────────────────
+
+const TTL_MONTHS = 3; // Prune products not seen in this many months
+
+/**
+ * Removes entries from seenProducts that haven't been seen in TTL_MONTHS months.
+ * Runs once per cycle to prevent unbounded memory/file growth.
+ */
+function pruneStaleProducts() {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - TTL_MONTHS);
+  const cutoffISO = cutoff.toISOString();
+
+  let pruned = 0;
+  for (const key of Object.keys(seenProducts)) {
+    const entry = seenProducts[key];
+    const lastSeen = entry.lastSeen || entry.firstSeen;
+    if (lastSeen && lastSeen < cutoffISO) {
+      delete seenProducts[key];
+      pruned++;
+    }
+  }
+  if (pruned > 0) {
+    clearLine();
+    console.log(`🧹 Pruned ${pruned} stale product(s) not seen in ${TTL_MONTHS}+ months.`);
+    saveJSON(SEEN_FILE, seenProducts);
+  }
+}
+
 async function scrape() {
   dashboardState.status = "scraping";
   const timestamp = new Date().toISOString();
   let allNewProducts = [];
 
-  for (const site of SITES) {
-    try {
+  pruneStaleProducts();
+
+  const results = await Promise.allSettled(
+    SITES.map(async (site) => {
       let products;
       if (site.type === "ogmini-api") {
-        products = await fetchOGMiniProducts(site.apiUrl);
+        products = await withRetry(() => fetchOGMiniProducts(site.apiUrl));
       } else if (site.type === "woo-api") {
-        products = await fetchWooProducts(site.apiUrl);
+        products = await withRetry(() => fetchWooProducts(site.apiUrl));
       } else if (site.type === "wix-ssr") {
-        products = await fetchWixSSRProducts(site.shopPageUrl, site.wixAppId);
+        products = await withRetry(() => fetchWixSSRProducts(site.shopPageUrl, site.wixAppId));
+      } else if (site.type === "karzanddolls-custom") {
+        products = await withRetry(() => fetchKarzAndDollsProducts(site.subcategories));
       } else if (site.type === "sitemap") {
-        products = await fetchSitemapProducts(site.sitemapUrl, site.productPathMatch);
+        products = await withRetry(() => fetchSitemapProducts(site.sitemapUrl, site.productPathMatch));
       } else if (site.type === "firstcry") {
-        products = await fetchFirstCryProducts(site.listingUrl);
+        products = await withRetry(() => fetchFirstCryProducts(site.listingUrl));
       } else {
-        // Default: Shopify
-        const rawProducts = await fetchAllCollectionProducts(site.collectionApi);
+        const rawProducts = await withRetry(() => fetchAllCollectionProducts(site.collectionApi));
         products = rawProducts.map(normalizeProduct);
       }
 
-      // Optional: filter by vendor (Shopify JSON API doesn't support server-side vendor filtering)
+      // Optional: filter by vendor
       if (site.vendorFilter) {
         products = products.filter((p) => p.vendor && p.vendor.toLowerCase() === site.vendorFilter.toLowerCase());
       }
 
+      return { site, products };
+    })
+  );
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      // Find the site by index — allSettled preserves order
+      const site = SITES[results.indexOf(result)];
       const stats = dashboardState.siteStats[site.shortName];
-      stats.totalProducts = products.length;
-      stats.lastCheck = timestamp;
-      stats.lastError = null;
+      stats.lastError = result.reason.message;
+      dashboardState.errors.push({ timestamp, site: site.name, message: result.reason.message });
+      if (dashboardState.errors.length > 20) dashboardState.errors = dashboardState.errors.slice(-20);
+      clearLine();
+      console.error(`❌ ${site.icon} ${site.name} error: ${result.reason.message}`);
 
-      const newProducts = products.filter((p) => {
+      // Loud failure alert for brittle scrapers that fail repeatedly
+      if (BRITTLE_SITE_TYPES.has(site.type)) {
+        consecutiveFailures[site.shortName]++;
+        if (consecutiveFailures[site.shortName] === LOUD_FAILURE_THRESHOLD) {
+          await sendLoudFailureEmail(site, result.reason.message);
+        }
+      }
+      continue;
+    }
+
+    const { site, products } = result.value;
+    const stats = dashboardState.siteStats[site.shortName];
+    stats.totalProducts = products.length;
+    stats.lastCheck = timestamp;
+    stats.lastError = null;
+    consecutiveFailures[site.shortName] = 0; // reset on success
+
+      const newArrivalProducts = [];
+      const restockedProducts = [];
+
+      for (const p of products) {
         const key = `${site.shortName}:${p.id}`;
-        if (seenProducts[key]) return false;
-        seenProducts[key] = {
-          site: site.name,
-          siteShort: site.shortName,
-          title: p.title,
-          price: p.price,
-          available: p.available,
-          image: p.image,
-          url: p.url,
-          firstSeen: timestamp,
-        };
-        return true;
-      });
+        const existing = seenProducts[key];
 
-      if (newProducts.length > 0) {
-        stats.newFound += newProducts.length;
-        const enriched = newProducts.map((p) => ({
+        if (!existing) {
+          // Brand-new item never seen before
+          seenProducts[key] = {
+            site: site.name,
+            siteShort: site.shortName,
+            title: p.title,
+            price: p.price,
+            available: p.available,
+            image: p.image,
+            url: p.url,
+            firstSeen: timestamp,
+            lastSeen: timestamp,
+          };
+          if (p.available) {
+            // New arrival and already in stock — alert immediately
+            newArrivalProducts.push(p);
+          }
+          // If out of stock, silently remember it (no alert)
+        } else {
+          // Known item — update lastSeen and check for restock
+          const wasOutOfStock = !existing.available;
+          existing.available = p.available;
+          existing.price = p.price;
+          existing.lastSeen = timestamp;
+
+          if (wasOutOfStock && p.available) {
+            // Previously out of stock, now in stock — restock event!
+            restockedProducts.push(p);
+          }
+        }
+      }
+
+      const totalAlertProducts = newArrivalProducts.length + restockedProducts.length;
+      if (totalAlertProducts > 0) {
+        stats.newFound += newArrivalProducts.length;
+        const enrichedNewArrivals = newArrivalProducts.map((p) => ({
           ...p,
           _siteName: site.name,
           _siteShort: site.shortName,
           _siteColor: site.color,
           _siteIcon: site.icon,
           _fullUrl: `${site.baseUrl}${p.url}`,
+          _isRestock: false,
         }));
-        allNewProducts.push(...enriched);
+        const enrichedRestocks = restockedProducts.map((p) => ({
+          ...p,
+          _siteName: site.name,
+          _siteShort: site.shortName,
+          _siteColor: site.color,
+          _siteIcon: site.icon,
+          _fullUrl: `${site.baseUrl}${p.url}`,
+          _isRestock: true,
+        }));
+        allNewProducts.push(...enrichedNewArrivals, ...enrichedRestocks);
 
-        console.log(`\n🆕 ${site.icon} ${site.name}: ${newProducts.length} NEW product(s)!`);
-        newProducts.forEach((p) => {
-          console.log(`   🏎️  ${p.title} — ₹${p.price} (${p.available ? "In Stock" : "Out of Stock"})`);
-        });
+        if (newArrivalProducts.length > 0) {
+          clearLine();
+          console.log(`🆕 ${site.icon} ${site.name}: ${newArrivalProducts.length} NEW arrival(s)!`);
+          newArrivalProducts.forEach((p) => {
+            console.log(`   🏎️  ${p.title} — ₹${p.price} (In Stock)`);
+          });
+        }
+        if (restockedProducts.length > 0) {
+          clearLine();
+          console.log(`🔄 ${site.icon} ${site.name}: ${restockedProducts.length} RESTOCK(s)!`);
+          restockedProducts.forEach((p) => {
+            console.log(`   ♻️  ${p.title} — ₹${p.price} (Back In Stock)`);
+          });
+        }
       }
-    } catch (err) {
-      const stats = dashboardState.siteStats[site.shortName];
-      stats.lastError = err.message;
-      dashboardState.errors.push({ timestamp, site: site.name, message: err.message });
-      if (dashboardState.errors.length > 20) dashboardState.errors = dashboardState.errors.slice(-20);
-      console.error(`\n❌ ${site.icon} ${site.name} error: ${err.message}`);
     }
-  }
 
   dashboardState.totalChecks++;
   dashboardState.lastCheck = timestamp;
@@ -697,9 +1004,12 @@ async function scrape() {
     saveJSON(SEEN_FILE, seenProducts);
 
     const firstProduct = allNewProducts[0];
-    const subject = allNewProducts.length === 1 
-      ? `🏎️ [${firstProduct._siteName}] ${firstProduct.title}`
-      : `🏎️ [${firstProduct._siteName}] ${firstProduct.title} (+ ${allNewProducts.length - 1} more)`;
+    const hasRestock = allNewProducts.some((p) => p._isRestock);
+    const hasNewArrival = allNewProducts.some((p) => !p._isRestock);
+    const subjectIcon = hasRestock && !hasNewArrival ? "♻️" : hasRestock ? "🏎️♻️" : "🏎️";
+    const subject = allNewProducts.length === 1
+      ? `${subjectIcon} [${firstProduct._siteName}] ${firstProduct._isRestock ? "[RESTOCK] " : ""}${firstProduct.title}`
+      : `${subjectIcon} [${firstProduct._siteName}] ${firstProduct._isRestock ? "[RESTOCK] " : ""}${firstProduct.title} (+ ${allNewProducts.length - 1} more)`;
 
     // Send email
     const html = buildEmailHTML(allNewProducts);
@@ -732,6 +1042,7 @@ async function scrape() {
     const siteSummary = SITES.map(
       (s) => `${s.icon}${dashboardState.siteStats[s.shortName]?.totalProducts || 0}`
     ).join(" ");
+    clearLine();
     process.stdout.write(
       `\r🔍 Check #${dashboardState.totalChecks} — ${siteSummary} — no new items — ${new Date().toLocaleTimeString("en-IN")}`
     );
